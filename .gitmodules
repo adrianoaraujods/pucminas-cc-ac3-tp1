@@ -1,0 +1,4 @@
+[submodule "sim/gem5"]
+	path = sim/gem5
+	url = https://github.com/gem5/gem5.git
+	branch = stable
