@@ -1,0 +1,127 @@
+
+\documentclass[12pt]{article}
+
+\usepackage{sbc-template}
+
+\usepackage{graphicx,url}
+
+\usepackage{orcidlink}
+
+%\usepackage[brazil]{babel}   
+\usepackage[utf8]{inputenc}  
+
+     
+\sloppy
+
+\title{Avaliação e Mitigação de Canais Encobertos Baseados em Estados de Substituição LRU e RRIP}
+
+
+\author{Adriano Araújo\inst{1}, Artur Rizzi\inst{1}, Eduardo Aniceto\inst{1}, Izabel Chaves\inst{1}\orcidlink{0009-0008-9198-3909},\\ Pedro Magalhães\inst{1}}
+
+\address{
+Departamento de Ciência da Computação -- Instituto de Ciências Exatas e Informática\\
+Pontifícia Universidade Católica de Minas Gerais (PUC Minas)\\
+30.535-610 -- Belo Horizonte -- Brasil\\
+\email{\{iopchaves,  1464597, 1568608, 1593221, 1447017\}@pucminas.edu.br}
+}
+
+\begin{document} 
+
+\maketitle
+
+%-----------------------------------------------
+% INTRODUÇÃO
+%-----------------------------------------------
+\section{Introdução}
+
+O desempenho das arquiteturas de computadores modernas é altamente impactado pela hierarquia de memória, principalmente no nível das memórias cache, como a L1 (\textit{Level 1}), que é a mais próxima fisicamente da CPU, e também a LLC (\textit{Last-Level Cache} ou Cache de Último Nível). A utilização de caches reduz a latência de acesso à memória principal, armazenando temporariamente dados que são acessados com frequência. Entretanto, como o espaço disponível nas caches é relativamente pequeno, é necessário utilizar políticas de substituição para decidir quais blocos devem ser removidos quando um novo bloco precisa ser armazenado. Esse tipo de mecanismo também está presente em outros sistemas que possuem recursos limitados, como sistemas de gerenciamento de memória e bancos de dados, nos quais é necessário decidir quais informações devem permanecer armazenadas e quais podem ser substituídas. Entre as políticas utilizadas em caches, é destacado a LRU (\textit{Least-Recently Used}, ou Menos Recentemente Usada) e suas variações computacionalmente mais baratas, como a PLRU (\textit{Pseudo-LRU}).
+
+No entanto, essas políticas podem introduzir vulnerabilidades de segurança, permitindo ataques de canais laterais (\textit{side-channels}) e canais encobertos (\textit{covert-channels}). Ataques como \textit{Flush+Reload} exigem uma falha de cache (\textit{cache miss}) para alterar o estado da memória. Na política LRU, porém, a própria atualização dos metadados relacionados à idade dos blocos pode vazar informações, permitindo a realização de ataques mesmo quando ocorre um acerto de cache (\textit{cache hit}). Isso possibilita que um atacante consiga inferir o padrão de acesso da vítima apenas medindo o tempo de suas próprias operações, tornando o ataque mais furtivo, mais rápido e capaz de contornar defesas baseadas no monitoramento de falhas de cache \cite{9354935}. Os processadores comerciais, a exemplo da Intel e AMD, utilizam arquiteturas de "caches seguras", que depende de particionamento ou preenchimento aleatório visando mitigar a vulnerabilidade, mas não solucionam totalmente. Como solução definitiva para essas arquiteturas, o isolamento não deve abranger apenas os dados, mas os metadados LRU também devem ser devidamente bloqueados ou particionados.
+
+Neste contexto, a motivação desta pesquisa surge da lacuna existente na avaliação empírica e quantitativa das contramedidas propostas na literatura. Trabalhos anteriores analisaram a utilização de defesas para reduzir ataques à hierarquia de cache, enquanto estudos sobre os estados da política LRU demonstraram que esses estados podem ser explorados para estabelecer canais encobertos \cite{9354935,9065598}. No entanto, ainda falta uma avaliação rigorosa da banda residual desses canais quando mecanismos de proteção estão presentes. Além disso, ataques à LLC já demonstraram ser práticos em processadores modernos \cite{7163050}, reforçando a necessidade de investigar o comportamento desses canais em diferentes níveis da hierarquia de memória. Essa questão se torna ainda mais relevante diante do uso de políticas modernas de substituição na LLC, como a família RRIP, que utiliza estados de predição para determinar quais blocos devem ser substituídos \cite{10.1145/1815961.1815971}.
+
+A hipótese que direciona este trabalho é que as camadas inferiores da hierarquia de memória, especificamente a LLC equipada com políticas de substituição modernas, não são totalmente imunes a ataques que exploram metadados de substituição. Além disso, isolar apenas os dados na cache é insuficiente, sendo necessário também um tratamento seguro e particionado dos estados da política para mitigar os vazamentos sem comprometer de forma significativa o desempenho.
+
+Dessa forma, o objetivo geral deste estudo é avaliar, por meio do simulador
+\textit{gem5}, o comportamento de canais encobertos baseados em políticas de
+substituição de cache, comparando as políticas LRU e RRIP e analisando seu
+impacto na segurança e no desempenho do sistema.
+
+Para alcançar este propósito, são definidos os seguintes objetivos específicos:
+
+\begin{itemize}
+    \item Implementar e configurar no simulador \textit{gem5} as políticas de
+    substituição LRU e RRIP para a avaliação dos canais encobertos.
+
+    \item Implementar um canal encoberto baseado no estado da política de
+    substituição e avaliar sua capacidade de transmitir informações.
+
+    \item Comparar o comportamento das políticas LRU e RRIP utilizando métricas
+    como taxa de transmissão e taxa de erro.
+
+    \item Avaliar o impacto das políticas de substituição no desempenho do
+    sistema por meio de métricas como IPC e número de acessos à cache.
+
+    \item Avaliar uma estratégia simples de mitigação baseada no isolamento ou
+    particionamento do estado de substituição e comparar seus resultados com
+    as configurações sem mitigação.
+\end{itemize}
+
+\section{Revisão e Análise Crítica}
+
+O artigo \textit{Leaking Information Through Cache LRU States in Commercial Processors and Secure Caches}\cite{9354935} investiga como os estados internos das políticas de substituição LRU podem ser explorados para criar canais laterais e canais encobertos. A principal contribuição do trabalho está em demonstrar que um acesso que resulta apenas em um \textit{cache hit} ainda é capaz de modificar o estado de substituição da cache. Dessa forma, um processo receptor pode induzir uma substituição e utilizar a diferença no tempo de acesso para inferir se outro processo acessou determinada linha de cache, possibilitando o vazamento de informações sem que o transmissor necessariamente provoque um \textit{cache miss}.
+
+A avaliação experimental constitui um dos principais pontos fortes do artigo, pois os autores demonstram a viabilidade do ataque em processadores comerciais Intel e AMD, considerando cenários de compartilhamento por \textit{hyper-threading} e \textit{time-slicing}. Os resultados mostram taxas de transmissão significativamente maiores no cenário de \textit{hyper-threading}, chegando a aproximadamente 500 Kbps em processadores Intel, enquanto no \textit{time-slicing} as taxas são drasticamente reduzidas. Essa diferença evidencia uma limitação importante: embora o canal baseado em LRU seja viável, sua eficiência depende diretamente da arquitetura do processador e da forma como os processos compartilham os recursos da CPU.
+
+Além da avaliação em processadores reais, o artigo analisa a vulnerabilidade de propostas de caches seguras, como a \textit{Partition-Locked Cache} e a \textit{Random Fill Cache}, utilizando o simulador gem5. Os resultados indicam que proteger ou particionar apenas os dados armazenados na cache não é suficiente quando os metadados responsáveis pela política de substituição continuam compartilhados. Entretanto, uma limitação do trabalho é que essa avaliação das caches seguras foi realizada em ambiente simulado, enquanto a validação experimental ocorreu apenas para processadores comerciais convencionais. Assim, o artigo evidencia uma lacuna relevante, que é a necessidade de investigar mecanismos de isolamento que protejam não apenas as linhas de dados, mas também os estados de substituição, avaliando de forma simultânea sua capacidade de mitigar o vazamento e seu impacto no desempenho da hierarquia de memória.
+
+%-----------------------------------------------
+% TRABALHOS RELACIONADOS
+%-----------------------------------------------
+\section{Trabalhos Relacionados}
+
+\subsection{Canais e Estados de Substituição em Caches}
+
+A pesquisa \textit{“Last-Level Cache Side-Channel Attacks are Practical”}\cite{7163050}, demonstrou o quão viável é explorar caches compartilhados, como a LLC - Last-Level Cache, em ambientes multi threaded e de nuvem para extrair chaves criptográficas. No entanto, enquanto os ataques clássicos focam no tempo do acesso à memória, o artigo em questão refina essa abordagem ao demonstrar que a própria política de substituição LRU (Least Recently Used) retém estado e é capaz do vazamento de informação. Como limitação, o ataque depende do uso de \textit{large pages} pelo atacante para montar os conjuntos de desvio (\textit{eviction sets}), e os próprios autores reconhecem que desabilitar esse recurso na VMM seria a defesa mais simples. Além disso, a arquitetura de LLC dividida em \textit{slices} obriga os autores a montar esses conjuntos por tentativa e erro. O ataque também exige etapa manual de análise e os autores admitem não ter testado o método em ambiente ruidoso ou em nuvem real.
+
+Ademais, a análise dos componentes e estados internos do processador se conecta com \textit{“Are Coherence Protocol States Vulnerable to Information Leakage?”}\cite{8327007}, porque ambas as pesquisas compartilham a mesma ideia de que estruturas de otimização de hardware são capazes de vazarem dados através de suas alterações de estado, não se limitando ao tempo de transferência de dados. Contudo, os autores mostram que, acima de 500~Kbps, a maioria das configurações testadas perde precisão significativamente. O ataque também exige cooperação entre dois processos maliciosos, trojan e spy, o que caracteriza um canal encoberto e restringe seu uso a cenários de vazamento interno. Além disso, a criação de memória compartilhada via KSM leva dezenas de segundos, e os testes foram feitos em um único modelo de processador.
+
+Em \textit{“Leaking Information Through Cache LRU States”}\cite{9065598} introduz-se a exploração da LRU, revelando falhas em arquiteturas que eram projetadas para isolar acessos. Porém, como qualquer acesso ao conjunto de cache altera o estado LRU, o receptor só pode medir o conjunto uma vez por rodada, obtendo no máximo um bit por medição, o que é uma limitação estrutural do canal. A política PLRU agrava isso, gerando erros de leitura. A técnica de medição por \textit{pointer chasing} também exige calibrar o tamanho da lista ligada. Por fim, a taxa de transmissão varia bastante conforme o cenário (600~Kbps em \textit{hyper-threading} contra poucos bps em compartilhamento por tempo).
+
+Esses trabalhos adotam metodologias bem distintas entre si. \cite{7163050} avalia ataques na LLC compartilhada, implicando em modelos de ameaça onde atacar a LLC permite ataques entre VMs distintas, enquanto \cite{9065598} concentra-se no estado LRU do cache L1 privado, o que normalmente exige coexecução no mesmo núcleo. Quanto à técnica de medição, \cite{7163050} usam \textit{Prime+Probe}, \cite{9065598} usam uma variação de \textit{pointer chasing} e \cite{8327007} medem diretamente a latência de acesso a blocos em diferentes estados de coerência.
+
+\subsection{Mitigações e Lacunas da Literatura}
+
+No escopo das defesas, \textit{“CATalyst: Defeating last-level cache side channel attacks in cloud computing”}\cite{7446082} propõe o uso da tecnologia Cache Allocation Technology (CAT) do hardware para particionar a LLC e neutralizar ataques. O artigo dialoga com essa solução ao tratar a eficácia de mecanismos de isolamento, haja visto que as defesas puramente baseadas em software ou particionamento parcial podem ser contornadas. A limitação é que a solução depende da tecnologia Intel CAT, herdando o limite de apenas 4 \textit{Classes of Service}, insuficiente para isolar muitas VMs. O particionamento fino por página também tem limites próprios, como poucas páginas seguras por VM e perda de desempenho. Além disso, o CATalyst neutraliza ataques por contenção de linha, mas não os canais baseados em metadados de coerência ou de substituição LRU explorados em~\cite{8327007} e~\cite{9065598}.
+
+Os ambientes experimentais das metodologias também revelam lacunas: trabalhos como \cite{7163050} e \cite{7446082} testam em máquinas virtualizadas simulando nuvem, enquanto \cite{8327007} e \cite{9065598} testam em processos nativos sem virtualização. 
+
+Desta forma, embora Xiong et al.~\cite{9354935} tenham demonstrado a viabilidade de canais encobertos baseados no estado de substituição LRU, a avaliação de contramedidas na literatura carece de uma base comparativa quantitativa e unificada. A pesquisa original foca sua avaliação empírica via simulação (gem5) apenas nas defesas de \textit{Partition-Locked (PL) cache} e \textit{Random Fill (RF) cache}. Outras abordagens estado-da-arte, como DAWG, ScatterCache, CEASER e InvisiSpec, tiveram sua resiliência analisada de forma estritamente qualitativa. Há uma lacuna significativa na literatura quanto à medição empírica da banda residual do canal encoberto frente a essas defesas.
+
+Além disso, estudos anteriores assumem que canais baseados em LRU em níveis mais baixos da hierarquia de memória (L2/LLC) seriam facilmente mitigáveis por técnicas preexistentes em L1. Tal suposição é feita sem uma validação experimental rigorosa e desconsidera o comportamento de políticas de substituição modernas comumente empregadas na LLC, como RRIP e suas variantes.
+
+Para preencher essas lacunas dentro de um escopo viável, este trabalho propõe uma avaliação experimental focada, utilizando o simulador gem5 em modo \textit{syscall-emulation} (SE). Nossa metodologia adapta os protocolos de canais com e sem memória compartilhada (Algoritmos 1 e 2 de~\cite{9354935}) para medir métricas de segurança em conjunto com métricas de desempenho. 
+
+Em suma, este artigo apresenta as seguintes contribuições principais:
+\begin{itemize}
+    \item \textbf{Validação Empírica na LLC:} A avaliação da capacidade do canal de substituição contra políticas modernas na LLC (como a família RRIP, nativa ou adaptada no ecossistema gem5), testando a suposição teórica da literatura de que camadas mais baixas da hierarquia seriam inerentemente mais fáceis de proteger;
+    \item \textbf{Análise de Desempenho Integrada:} Uma avaliação do \textit{trade-off} entre segurança e desempenho, medindo o impacto em IPC sob cargas de trabalho abertas e controladas (ex.: PARSEC, MiBench ou microbenchmarks sintéticos);
+    \item \textbf{Extensão Comparativa (Opcional):} Caso a curva de aprendizado da ferramenta permita, a implementação e medição quantitativa de uma defesa por particionamento dinâmico do estado de substituição (ex.: adaptação do conceito do DAWG) para fins de comparação direta com os dados originais.
+\end{itemize}
+
+%-----------------------------------------------
+% METODOLOGIA
+%-----------------------------------------------
+\section{Metodologia}
+
+%-----------------------------------------------
+% USO DE IA
+%-----------------------------------------------
+\section{Uso de IA}
+[...] falar do uso para a simulação do gem5 e onde usou
+
+\newpage
+\bibliographystyle{sbc}
+\bibliography{sbc-template}
+
+\end{document}
