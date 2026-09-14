@@ -63,8 +63,10 @@ def parse_args():
                         help="threads por CPU (1 = sem SMT)")
     parser.add_argument("--num-cores", type=int, default=1,
                         help="nucleos de CPU (compartilham L2/LLC; sem SMT no O3 25.1)")
-    parser.add_argument("--maxinsts", type=int, default=0,
-                        help="limite de instrucoes simuladas (0 = ilimitado)")
+    parser.add_argument("--maxticks", "--maxinsts", type=int, default=0,
+                        dest="maxticks",
+                        help="limite de ticks simulados (0 = ilimitado; "
+                             "m5.simulate(ticks))")
     parser.add_argument("--outdir", type=str, default=os.getcwd(),
                         help="diretorio de saida (stats.txt, config.ini, etc.)")
     return parser.parse_args()
@@ -220,8 +222,8 @@ def main():
     root = Root(full_system=False, system=system)
     m5.instantiate()
 
-    if args.maxinsts:
-        exit_event = m5.simulate(args.maxinsts)
+    if args.maxticks:
+        exit_event = m5.simulate(args.maxticks)
     else:
         exit_event = m5.simulate()
     print(f"Simulation end reached @ tick {m5.curTick()} "

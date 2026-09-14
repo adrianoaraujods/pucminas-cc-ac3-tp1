@@ -126,10 +126,12 @@ Esta etapa (Etapa 2) exige, além do texto do artigo: **ambiente do simulador co
 - Pendência de escopo (não fazer): O3-SMT continua impedido pela build.
 
 ### Fase 7 — Frente de desempenho (Etapa 3; metodologia documentada agora)
-- Microbenchmark sintético com padrão *scan* (array maior que a LLC com
-  stride) para contraste LRU×SRRIP; MiBench (binários estáticos X86) como
-  segundo conjunto.
-- Métricas: IPC e contadores de acessos/erros da LLC (stats do gem5).
+- **Executado**: microbenchmark sintético *scan* (`sim/src/scan.c`, loop
+  `scripts/perf.sh`): buffer = tamanho da LLC varrido em streaming com hot
+  set revisitado; SRRIP reduz MR da LLC (0,32→0,13) e eleva IPC ~21% vs.
+  LRU sob o mesmo orçamento de ticks (`runs/perf/perf.tsv`).
+- Pendente (Etapa 3): MiBench (binários estáticos X86) como segundo
+  workload; gráficos de IPC e miss rate; variar tamanho de B/H.
 
 ### Fase 8 — Mitigação por way-partitioning
 - Descrever na metodologia: cada domínio confinado a um subconjunto de

@@ -102,6 +102,34 @@ Observacoes de engenharia (SE + pthreads no gem5 25.1):
   o cenario experimental O3-SMT do plano original; o modelo SMT timing e o
   mais fiel ao co-location fisico disponivel.
 
+## Frente de desempenho (Etapa 3) - microbenchmark scan
+
+Carga sintetica `sim/src/scan.c`: buffer `B` do tamanho da LLC (2 MiB)
+varrido em streaming (padrao scan; linhas 64 B) entre passadas que revisitam
+um hot set `H` de 32 KiB (tamanho da L1). CPU `timing` em modo SE,
+`--maxticks 30e9` (~60 M ciclos / ~2,4-2,9 M instrucoes). Loop:
+`scripts/perf.sh` (resultados em `runs/perf/perf.tsv`, extraidos do
+`stats.txt`: `system.cpu.ipc`, `overallMissRate::total` por nivel).
+
+| Politica (scope) | IPC | MR L1d | MR L2 | MR LLC |
+|---|----|----|----|----|
+| LRU (l2llc ou all) | 0,0397 | 0,925 | 0,999 | **0,319** |
+| SRRIP (l2llc) | 0,0480 | 0,938 | 0,9996 | **0,132** |
+| SRRIP (all) | 0,0480 | 0,938 | 0,9995 | **0,132** |
+
+- **SRRIP expoe a scan-resistance que motiva a politica**: o streaming insere
+  em "long distance" e nao recicla o hot set nem polui a LLC — miss rate da
+  LLC cai de 0,319 (LRU) para 0,132 (SRRIP) e o **IPC sobe ~21%** (0,040 ->
+  0,048) sob o mesmo orcamento de ticks.
+- A latencia de miss do L1d e alta (~0,93) nos dois casos: esperado, o buffer
+  de streaming satura a L1 independentemente da politica; o efeito da politica
+  aparece nos niveis mais baixos (L2/LLC), exatamente o escopo do SRRIP.
+- Escopo `all` vs `l2llc`: indistinguiveis (a L2 256 KiB nao comporta o B de
+  2 MiB; a diferencia entre politicas se manifesta na LLC).
+
+Pendente (Etapa 3): MiBench como segundo workload; graficos de IPC e miss
+rate; investimento se a janela de simulação permitir.
+
 ## Pendente
 
 (a) redigir Metodologia + "Uso de IA" no `article/main.tex` (F9);
