@@ -1,0 +1,184 @@
+%-----------------------------------------------
+% METODOLOGIA
+%-----------------------------------------------
+\section{Metodologia}
+
+Esta seção descreve o processo de construção da bancada experimental, os
+protocolos de canal encoberto implementados, as variáveis e métricas
+adotadas e o plano de reprodutibilidade. Todo o código e os comandos de
+execução estão versionados no repositório do experimento
+(\texttt{sim/}), e os resultados detalhados em \texttt{sim/results/README.md}.
+
+\subsection{Ambiente de simulação}
+
+Toda a avaliação foi conduzida no simulador \textit{gem5} em modo
+\textit{syscall-emulation} (SE), braço X86, com a versão pinada
+\texttt{f5c5a6e390f55dd5984977815bf9d0bd05da6945} (gem5 25.1, ramo
+\textit{stable}). A toolchain é isolada para garantir reprodutibilidade:
+Python 3.11 via \textit{mise} e SCons instalado em \texttt{sim/.venv}; o
+cenário SE não requer sistema operacional convidado, o que reduz o ruído de
+medição.
+
+A hierarquia de memória simulada fixa os seguintes parâmetros:
+
+\begin{itemize}
+    \item microarquitetura: 1 núcleo \textit{TimingSimple} por defeito
+          (2 contextos de hardware no cenário SMT, discutido na
+          Seção~\ref{sub:canal});
+    \item L1: 32 KiB, 8-way, 64 B por linha;
+    \item L2: 256 KiB, 8-way;
+    \item LLC: 2 MiB, 16-way;
+    \item memória principal: 8 GiB;
+    \item clock nominal de 2 GHz (período de 500 ps no SE).
+\end{itemize}
+
+As políticas de substituição avaliadas são: \textbf{LRU}; \textbf{SRRIP}
+canônico \cite{10.1145/1815961.1815971}, obtido por parametrização da classe
+\texttt{BRRIPRP} já existente no gem5 (\texttt{btp=100},
+\texttt{hit\_priority=True}), sem escrever código C++ novo; \textbf{RRIP}
+(\texttt{btp=100}, sem \textit{hit-priority}); e \textbf{BRRIP}
+(\texttt{btp=3}, com \textit{fill-priority}). A opção
+\texttt{--policy-scope} define em quais níveis a política escolhida é
+aplicada (L1; L2+LLC; apenas LLC; ou todos), permitindo isolar o efeito de
+cada nível na vazão do canal.
+
+Duas restrições do simulador pinado orientaram o desenho experimental e são
+documentadas como limitações da bancada:
+
+\begin{itemize}
+    \item o modelo \texttt{O3} segfaulta em
+          \texttt{Decode::sortInsts} (decode.cc:488) até mesmo com um
+          programa de fio único; nenhum experimento deste trabalho usa O3;
+    \item no modelo \textit{TimingSimple}, a latência de uma falha
+          resolvida fora da L1 não aparece no caminho
+          \textit{load-to-use} (acessos que acertam L1, L2 ou DRAM medem
+          tempos próximos); o único observável em medida de tempo é o par
+          \textit{hit/miss} no nível L1.
+\end{itemize}
+
+\subsection{Protocolos de canal encoberto}
+\label{sub:canal}
+
+Os protocolos seguem e adaptam os algoritmos do trabalho de Xiong et al.
+\cite{9354935}. Duas famílias foram implementadas em driver C para o modo
+SE:
+
+\begin{itemize}
+    \item \textbf{Protocolo de fio único} (\texttt{channel.c}): um único
+          processo assume os papéis de transmissor e receptor em sequência.
+          A fase de \textit{decode} toca as \texttt{d} linhas do conjunto
+          alvo com um ponteiro simbolicamente compartilhado
+          (\textit{line[0]}); se o bit vale 1, a linha compartilhada é
+          acionada uma vez. A fase de \textit{medida} percorre uma cadeia de
+          ponteiros (\textit{pointer chasing}, profundidade \texttt{K})
+          partindo da linha compartilhada e cronometra o percurso com
+          \texttt{rdtsc}. A linha está presente na cache na fase de medida
+          (\textit{hit}) sse o bit transmitido foi 1; a posição de evicção da
+          política de substituição é o canal. Todos os acessos são leituras, de
+          modo que o conteúdo das linhas nunca é alterado. O conjunto alvo é o
+          \texttt{set 0} (stride de 4096 B entre linhas do mesmo conjunto).
+    \item \textbf{Protocolo de dois fios (SMT)} (\texttt{channel\_2t.c}):
+          um único binário com \texttt{pthreads} executa o receptor (fio
+          principal) e o transmissor em dois \textit{thread contexts} do
+          mesmo núcleo, compartilhando fisicamente a L1 (1 core,
+          \texttt{numThreads=2}, CPU \textit{Timing}). O protocolo é
+          \textbf{Prime+Probe}: o receptor faz o \textit{prime} de um
+          conjunto de \texttt{d} linhas do anel de ponteiros; só quando o bit
+          a transmitir é 1 o transmissor toca as \texttt{d} linhas do
+          \textit{eviction set} (mesmo conjunto, linhas distintas), evictando
+          a linha compartilhada; o receptor então cronometra o anel. A
+          sincronização é feita por uma flag \texttt{volatile} compartilhada
+          (\texttt{g\_phase}), sem mutex, porque o modo SE do gem5 não
+          implementa \texttt{futex}. Parâmetros usados: \texttt{PRIME\_P=6}
+          passes de \textit{prime}, \texttt{tail=8} rodadas descartadas e
+          \texttt{warmup=32} rodadas de aquecimento.
+\end{itemize}
+
+Para executar o dois fios no SE, duas configurações de engenharia foram
+necessárias: (i) \texttt{cpu.workload} precisa conter \texttt{numThreads}
+processos --- reusa-se o mesmo \texttt{Process} nos dois contextos com o
+override \texttt{SmtProcess} (o \texttt{initState} C++ roda uma única vez no
+contexto 0; o contexto 1 nasce \textit{Halted} e é ativado pelo
+chamado de sistema \texttt{clone} do \texttt{pthread\_create}); e (ii) o
+binário deve ser dinâmico (\texttt{-pthread}), pois binário estático panica
+com o mapeamento de TLS endereçado em página inexistente.
+
+\subsection{Avaliação de desempenho}
+
+Além de métricas de segurança, o trabalho mede o custo de desempenho das
+políticas sob uma carga sintética de padrão \textit{scan}
+(\texttt{scan.c}): um buffer do tamanho da LLC (2 MiB) é varrido em
+\textit{streaming} e, entre passadas, um conjunto quente de 32 KiB
+(tamanho da L1) é revisitado. Sob LRU o \textit{streaming} recicla a
+L2/LLC e expulsa o conjunto quente; sob SRRIP as linhas do
+\textit{streaming} entram em \textit{long distance} e o conjunto quente
+conserva prioridade, reduzindo o \textit{miss rate} da LLC. Esse padrão
+expõe a \textit{scan-resistance} que motiva o SRRIP e embasa a discussão do
+trade-off segurança-desempenho.
+
+\subsection{Variáveis e métricas}
+
+\begin{itemize}
+    \item \textbf{Variáveis independentes:} política de substituição
+          (LRU, SRRIP, RRIP, BRRIP); escopo da política (níveis da
+          hierarquia); parâmetros do canal (\texttt{d}, \texttt{K}, janela
+          de medida); mensagem transmitida (fixada em 64 bits para o
+          fechamento).
+    \item \textbf{Variáveis dependentes:} taxa de transmissão efetiva
+          (Kbps $=$ bits por rodada $\times$ 2 GHz por ciclos de rodada); taxa
+          de erro medida por edit-distance Wagner-Fischer entre a mensagem
+          transmitida e a recebida e por erros por bit; latências em ciclos
+          (bimodalidade de \textbf{hit} vs \textbf{miss}); IPC e \textit{miss
+          rate} por nível no experimento de desempenho.
+\end{itemize}
+
+A separabilidade do canal é avaliada inspecionando a distribuição bimodal de
+latências e o limiar ótimo de decisão; o canal é considerado funcional quando
+a edit-distance é nula nos 64 bits transmitidos.
+
+\subsection{Reprodutibilidade}
+
+A bancada é versionada em \texttt{sim/} com a configuração própria do gem5
+(\texttt{configs/config\_channel.py}), os drivers (\texttt{src/}), os
+scripts de varredura e análise (\texttt{scripts/}) e as saídas em CSV
+(\texttt{results/runs/}). O build é fixado por submódulo (commit do gem5) e a
+toolchain por arquivo de versão. Os comandos de execução para cada cenário ---
+fio único, SMT e desempenho --- estão documentados em \texttt{sim/README.md};
+todas as tabelas de resultados referenciam os scripts que as produzem.
+
+\subsection{Uso de IA}
+
+Nesta etapa, uma ferramenta de IA (assistente de desenvolvimento) foi
+utilizada como apoio na simulação com o gem5 nas seguintes frentes, sempre
+sob revisão e responsabilidade integral do grupo:
+
+\begin{itemize}
+    \item \textbf{Condução das decisões de projeto.} Uma sessão estruturada
+          de entrevista (\textit{grilling}) terminou na árvore de decisões
+          aprovadas pelo grupo (nomenclatura da política, cenários de
+          execução, hierarquia, workloads etc.), registrada em
+          \texttt{article/plano-uso-de-ia.md}.
+    \item \textbf{Levantamento de fatos técnicos.} Verificação em fontes
+          primárias (artigo original, código do gem5 e do ChampSim) dos
+          protocolos Algoritmos 1, 2 e 3, das políticas disponíveis no gem5
+          e da representação do SRRIP canônico a partir da classe
+          \texttt{BRRIPRP}.
+    \item \textbf{Implementação e depuração.} Escrita e validação do driver
+          do canal, da configuração \textit{SE} do gem5 e dos scripts de
+          métricas; em particular, a depuração das restrições do SE com
+          fios (initState único via \texttt{SmtProcess},
+          \texttt{workload} com \texttt{numThreads} entradas, binário
+          dinâmico) e a interpretação dos desvios imprevistos (O3 quebrado,
+          colapso do RRIP sob \textit{flood} cross-thread).
+    \item \textbf{Análise e redação.} Geração das tabelas de resultados e
+          redação desta metodologia, todo o conteúdo validado pelas métricas
+          obtidas e revisado pelo grupo antes da inclusão no artigo.
+\end{itemize}
+
+As recomendações da IA acatadas incluem: representar o SRRIP canônico por
+parametrização do \texttt{BRRIPRP} (dispensando código C++ novo), realizar a
+medida realista no cenário SMT (L1 compartilhada) preservando
+comparabilidade com o artigo original, e usar o padrão \textit{scan} para
+expor a diferença de desempenho LRU $\times$ SRRIP. As hipóteses, interpretações e
+a escolha dos parâmetros fixos permaneceram deliberações do grupo. O registro
+completo do uso está em \texttt{article/plano-uso-de-ia.md}.
