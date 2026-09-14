@@ -1,0 +1,13 @@
+name	policy	scope	alg	d	tick_ps	errors	rate_kbps	err_per_bit
+lru_all_a1_d4	lru	all	1	4	641499000	46	99.766	0.71875
+lru_all_a1_d8	lru	all	1	8	687155500	0	93.138	0.0
+lru_all_a1_d12	lru	all	1	12	724652500	0	88.318	0.0
+srrrip_all_a1_d8	srrrip	all	1	8	685133500	46	93.412	0.71875
+lru_llc_a1_d8	lru	llc	1	8	687155500	0	93.138	0.0
+lru_all_a2_d8	lru	all	2	8	688635000	46	92.937	0.71875
+f6_smt_lru_d8	lru	smt_l1	3	8	1058612000	0	60.457	0.00000
+f6_smt_srrrip_d8	srrrip	smt_l1	3	8	1059319000	0	60.416	0.00000
+f6_smt_rrrip_d8	rrrip	smt_l1	3	8	1059505000	0	60.406	0.00000
+f6_smt_brrip_d8	brrip	smt_l1	3	8	1063417000	5	60.183	0.07812
+f6_smt_lru_d4	lru	smt_l1	3	4	987521000	18	64.809	0.28125
+f6_smt_lru_d16	lru	smt_l1	3	16	1396936500	18	45.815	0.28125

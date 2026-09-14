@@ -1,3 +1,4 @@
 .venv/
 gem5/build/
 gem5/out/
+results/bin/

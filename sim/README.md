@@ -49,3 +49,29 @@ Saída esperada: `Hello world!` seguido de `Exiting @ tick 6046000 ...`.
 > Nota: `configs/example/se.py` foi deprecado no gem5 25.x — vive em
 > `configs/deprecated/example/`. O experimento usará script de configuração
 > próprio em `sim/configs/`.
+
+## Canal de 2 fios (SMT) — F6
+
+O canal com transmissor+receptor separados roda sobre **um único core
+TimingSimple com `numThreads=2`** (SMT real: as duas threads do mesmo binário
+compartilham a L1). Motivo: no gem5 25.1 pinado o O3 (qualquer threading)
+segfaulta em `Decode::sortInsts` mesmo single-thread, e no `timing` a latência
+de miss além da L1 não aparece no caminho load-to-use (só hit/miss na L1 é
+observável). O driver faz Prime+Probe na L1 compartilhada.
+
+```bash
+sim/gem5/build/X86/gem5.opt -d <outdir> \
+  sim/configs/config_channel.py \
+  --binary sim/results/bin/channel_2t_dyn \
+  --cpu-type timing --num-cores 1 --num-threads 2 \
+  --policy lru --policy-scope l1 \
+  --cmdargs "--out <csv> -d 8"
+```
+
+Pitfalls (SE + pthreads no gem5 25.1):
+- `len(cpu.workload)` deve ser `numThreads` (fatal em `cpu/base.cc:186`); o
+  mesmo `Process` nos 2 contextos exige o override `SmtProcess` (initState
+  único no contexto 0; contexto 1 nasce Halted e é ativado pelo `clone`).
+- binário deve ser dinâmico (`-pthread`, sem `-static`); estático panica em
+  SE (TLS).
+- resultado: ver `sim/results/README.md`.
