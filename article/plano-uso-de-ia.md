@@ -44,7 +44,7 @@ Esta etapa (Etapa 2) exige, além do texto do artigo: **ambiente do simulador co
 | --- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Q1  | Escopo desta etapa          | Bancada viável + PoC do canal + metodologia no artigo                                                                                                                 |
 | Q2  | Política RRIP               | SRRIP canônico (hit-priority), expresso no gem5 como `BRRIPRP(num_bits=2, btp=100, hit_priority=True)` + alias Python `SRRIPRP`; sem modificação em C++               |
-| Q3  | Execução sender/receiver    | PoC com fio único (papéis em sequência); medida realista com core O3 de 2 threads (SMT)                                                                               |
+| Q3  | Execução sender/receiver    | PoC com fio único (papéis em sequência); medida realista com SMT na L1 compartilhada (1 core `timing`, `numThreads=2`) — O3 está quebrado no gem5 pinado |
 | Q4  | Nível de cache avaliado     | Sanity check no L1; resultado principal na LLC                                                                                                                        |
 | Q5  | Toolchain                   | gem5 branch `stable` (commit fixado); Python 3.11 via `mise`; SCons via pip; build X86 SE                                                                             |
 | Q6  | Protocolos de canal         | Algoritmos 1 (com memória compartilhada) e 2 (sem memória compartilhada)                                                                                              |
@@ -58,9 +58,10 @@ Esta etapa (Etapa 2) exige, além do texto do artigo: **ambiente do simulador co
 - SRRIP canônico via parametrização do `BRRIPRP` (evita escrever C++)
   **em vez de** usar o BRRIP default (btp=3), cuja inserção aleatória
   não corresponde ao SRRIP citado no artigo e embaralharia a análise do canal.
-- Cenário de medida realista no modo hyper-threaded (O3 + 2 threads),
-  preservando comparabilidade com o artigo original (~600 Kbps vs. ~2 bps
-  em time-slicing).
+- Cenário de medida realista no modo hyper-threaded (SMT `timing` com 2
+  contextos, L1 compartilhada), preservando comparabilidade com o artigo
+  original; o O3 do gem5 25.1 pinado inviabilizou o O3-SMT (segfault
+  documentado em `sim/results/README.md`).
 - Workload sintético com padrão de varredura para expor a diferença de
   desempenho entre LRU e SRRIP (objetivo original do SRRIP: *scan-resistance*).
 
@@ -110,11 +111,19 @@ Esta etapa (Etapa 2) exige, além do texto do artigo: **ambiente do simulador co
   (bits × 2 GHz ÷ ciclos) e taxa de erro (Wagner-Fischer/edit-distance).
 - Saídas em CSV + gráficos de latência por rodada e erro × taxa.
 
-### Fase 6 — Cenário realista (O3-SMT)
-- O3 CPU com 2 contextos de hardware; binário com `pthreads`
-  (transmissor/receptor) seguindo o protocolo do Alg. 3 (sincronização por
-  `Ts`/`Tr` via `rdtsc`, sem mutex).
-- Medida de banda e erro no cenário hyper-threaded.
+### Fase 6 — Cenário realista (SMT na L1 compartilhada) — CONCLUÍDA com desvio
+- **Executado (modelo final)**: o O3 do gem5 25.1 pinado está quebrado
+  (segfault `Decode::sortInsts` até com `hello` de fio único), e no CPU
+  `timing` a latência de *miss* além da L1 é invisível no caminho
+  load-to-use. O cenário realista passou a ser **SMT de verdade**: 1 core
+  TimingSimple, `numThreads=2`, mesmas threads do binário (`pthread_create`
+  → `clone`) compartilhando a L1, protocolo **Prime+Probe** (Alg. 3 com
+  sincronização por flag `volatile g_phase`).
+- Resultado: sob **LRU** erro zero (0/64; lat 374 vs 182, limiar 191);
+  SRRIP/RRIP **não** colapsam o canal neste cenário de flood cross-thread
+  (scan da RRIP incrementa linhas quentes → vazam como LRU; 0/64); BRRIP
+  degrada (5/64). `d≈assoc` é condição (d=4/d=16 → 18/64).
+- Pendência de escopo (não fazer): O3-SMT continua impedido pela build.
 
 ### Fase 7 — Frente de desempenho (Etapa 3; metodologia documentada agora)
 - Microbenchmark sintético com padrão *scan* (array maior que a LLC com
@@ -137,7 +146,10 @@ Esta etapa (Etapa 2) exige, além do texto do artigo: **ambiente do simulador co
 | Risco                                      | Contramedida                                                                     |
 | ------------------------------------------ | -------------------------------------------------------------------------------- |
 | Python 3.14 do sistema incompatível        | Python 3.11 isolado via `mise`                                                   |
-| Limitacões do SE multithread (clone/futex) | Protocolo sem mutex (Ts/Tr por rdtsc); fallback: cenário time-sliced documentado |
+| O3 do gem5 25.1 pinado quebrado (segfault) | Modelo SMT com CPU `timing` (1 core, `numThreads=2`, L1 compartilhada)           |
+| TimingSimple não modela latência além do L1| Discriminador restrito ao par hit/miss na L1 compartilhada (Prime+Probe SMT)     |
+| SRRIP/RRIP não colapsam sob flood cross-thread | Documentado como achado; colapso RRIP demonstrado só no protocolo de fio único |
+| Limitacões do SE multithread (clone/futex) | Protocolo sem mutex (flag `volatile g_phase`); `len(workload)==numThreads`; guard `SmtProcess` |
 | Granularidade do `rdtsc` no SE             | Validação cruzada com stats de cache do gem5 por rodada                          |
 | Build longo do gem5                        | Compilação paralela (24 núcleos); artefatos fora do git (`.gitignore`)           |
 
